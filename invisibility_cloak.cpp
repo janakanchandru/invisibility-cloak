@@ -16,7 +16,7 @@ void displayAsImage(Mat img)
     waitKey(0);
 }
 
-Mat processFrame(Mat frame, Mat background)
+Mat processFrame(Mat frame, Mat background, int frame_width, int frame_height)
 {
     Mat result;
 
@@ -29,27 +29,58 @@ Mat processFrame(Mat frame, Mat background)
 
     // create mask for cloak
     Mat cloak_mask;
-    inRange(hsv_frame, Scalar(40, 40, 40), Scalar(170, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
+    inRange(hsv_frame, Scalar(118, 10, 70), Scalar(175, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
 
-    // clean cloak_mask
+    // clean cloak_mask, erosion to remove noise and dilate to expand eroded mask
     Mat kernel3x3 = Mat::ones(3, 3, CV_32F);
     Mat kernel5x5 = Mat::ones(5, 5, CV_32F);
     Mat kernel7x7 = Mat::ones(7, 7, CV_32F);
     Mat kernel9x9 = Mat::ones(9, 9, CV_32F);
-    Mat kernel50x50 = Mat::ones(50, 50, CV_32F);
-    morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel9x9);   //erosion (removes noise) + dilation (expands)
-    morphologyEx(cloak_mask, cloak_mask, MORPH_DILATE, kernel9x9); //second dilation
+
+    Mat ellipse5x5 = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
+    Mat ellipse7x7 = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
+
+    morphologyEx(cloak_mask, cloak_mask, MORPH_ERODE, kernel5x5);
+    morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel5x5);
+
+    // find remaining noise and mask
+    Mat contourMask = Mat::zeros(frame_height, frame_width, CV_8U);
+    vector<Mat> contours;
+    findContours(cloak_mask, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
+
+    vector<vector<Point> > contours_poly(contours.size());
+    vector<Point2f>centers(contours.size());
+    vector<float>radius(contours.size());
+    for(int i = 0; i < contours.size(); i++)
+    {
+        auto c = contours[i];
+        int count = 0;
+        double arc = arcLength(c, true);
+
+        if(arc < 56)
+        {
+        approxPolyDP( contours[i], contours_poly[i], 1, true );
+        minEnclosingCircle( contours_poly[i], centers[i], radius[i] );
+        drawContours( contourMask, contours_poly, (int)i, 255 );
+        circle( contourMask, centers[i], (int)radius[i], 255, -1 );
+        }
+    }
+    morphologyEx(contourMask, contourMask, MORPH_DILATE, kernel3x3, Point(-1,-1), 1);
 
     // create surrounding mask (invert cloak_mask)
     Mat surrounding_mask;
     bitwise_not(cloak_mask, surrounding_mask);
+    addWeighted(surrounding_mask, 1, contourMask, 1, 0, surrounding_mask);
+    morphologyEx(surrounding_mask, surrounding_mask, MORPH_ERODE, ellipse7x7, Point(-1,-1), 1); //does opposite of erode in this case
 
     // segment out cloak
     Mat segmented_frame;
     bitwise_and(frame, frame, segmented_frame, surrounding_mask);
 
-    // create hole fill
+    // overlay background on cloak hole
     Mat background_fill;
+    subtract(cloak_mask, contourMask, cloak_mask);
+    morphologyEx(cloak_mask, cloak_mask, MORPH_DILATE, ellipse7x7, Point(-1,-1), 1);
     bitwise_and(background, background, background_fill, cloak_mask);
 
     // create result
@@ -70,9 +101,9 @@ int main()
     int frame_width = cap.get(CV_CAP_PROP_FRAME_WIDTH);
     int frame_height = cap.get(CV_CAP_PROP_FRAME_HEIGHT);
 
-    VideoWriter video("result.mp4", CV_FOURCC('m','p','4','v'), 20, Size(frame_width,frame_height));
+    VideoWriter video("result.mp4", CV_FOURCC('m','p','4','v'), 25, Size(frame_width,frame_height));
 
-    // assuming first couple frames are of background, get background
+    // assume first couple frames are of background
     Mat background, frame;
     cap >> frame;
     for (int i = 0; i < 30; i++)
@@ -82,9 +113,13 @@ int main()
     flip(background, background, 1);
 
     Mat processedFrame;
+    // int count = 0;
     while (!frame.empty())
     {
-        processedFrame = processFrame(frame, background);
+        processedFrame = processFrame(frame, background, frame_width, frame_height);
+        // cout << count++ << endl;
+        // imshow("processedFrame", processedFrame);
+        // waitKey(0);
         video.write(processedFrame);
         cap >> frame;
     }

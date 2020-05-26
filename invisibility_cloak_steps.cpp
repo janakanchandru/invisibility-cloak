@@ -1,4 +1,3 @@
-// Example program
 #include <iostream>
 #include <string>
 #include <opencv2/videoio.hpp>
@@ -24,11 +23,11 @@ int main()
     cout << "Error opening file" << endl;
     return -1;
   }
+
   int frame_width = cap.get(CV_CAP_PROP_FRAME_WIDTH);
   int frame_height = cap.get(CV_CAP_PROP_FRAME_HEIGHT);
 
-
-  // assuming first couple frames are of background, get background
+  // assume first couple frames are of background
   Mat background;
   for (int i = 0; i < 30; i++)
   {
@@ -36,8 +35,9 @@ int main()
   }
   flip(background, background, 1);
 
+  // get frame
   Mat frame;
-  for (int x = 0; x < 450; x++)
+  for (int x = 0; x < 139; x++)
     cap >> frame;
   flip(frame, frame, 1);
 
@@ -48,57 +48,64 @@ int main()
 
   // create mask for cloak
   Mat cloak_mask;
-  inRange(hsv_frame, Scalar(40, 40, 40), Scalar(170, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
+  inRange(hsv_frame, Scalar(118, 10, 70), Scalar(175, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
 
   imshow("frame", frame);
   imshow("hsv_frame", hsv_frame);
   imshow("cloak_mask", cloak_mask);
   waitKey(0);
-
   destroyAllWindows();
 
   // clean cloak_mask
   Mat kernel3x3 = Mat::ones(3, 3, CV_32F);
   Mat kernel5x5 = Mat::ones(5, 5, CV_32F);
   Mat kernel7x7 = Mat::ones(7, 7, CV_32F);
-  Mat kernel50x50 = Mat::ones(50, 50, CV_32F);
-  morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel50x50);   //erosion (removes noise) + dilation (expands)
-  morphologyEx(cloak_mask, cloak_mask, MORPH_DILATE, kernel50x50); //second dilation
-  //  morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel9x9);
+  Mat kernel9x9 = Mat::ones(9, 9, CV_32F);
 
-  // morphologyEx(cloak_mask, cloak_mask, MORPH_ERODE, kernel);
+  Mat ellipse5x5 = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
+  Mat ellipse7x7 = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
+
+  morphologyEx(cloak_mask, cloak_mask, MORPH_ERODE, kernel5x5);
+  morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel5x5);
+
   imshow("clean cloak_mask", cloak_mask);
   waitKey(0);
+  
+  // find remaining noise and mask
+  Mat contourMask = Mat::zeros(frame_height, frame_width, CV_8U);
+  vector<Mat> contours;
+  findContours(cloak_mask, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
 
-  // Mat edge;
-  // vector<Mat> contours;
-  // Canny(cloak_mask, edge, 50, 100);
-  // imshow("edge", edge);
-  // waitKey(0);
+  vector<vector<Point> > contours_poly(contours.size());
+  vector<Point2f>centers(contours.size());
+  vector<float>radius(contours.size());
+  for(int i = 0; i < contours.size(); i++)
+  {
+    auto c = contours[i];
+    int count = 0;
+    double arc = arcLength(c, true);
 
-  // Mat contourMask = Mat::ones(frame_height, frame_width, CV_8U);
-  // findContours(edge, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
-  // for(auto &c : contours)
-  // {
-  //   int count = 0;
-  //   double arc = arcLength(c, true);
-  //   double area = contourArea(c);
-  //   cout << arc << " " << contourArea(c) << endl;
-  //   if(area < 1000.0)
-  //   {
-  //     drawContours(contourMask, c, -1, 0, -1); //CV_FILLED = -1
-  //     // fillPoly(contourMask, c, Scalar(0,0,0));
-  //   }
-  //   imshow("contourMask", contourMask);
-  //   waitKey(0);
-  // }
+    if(arc < 56)
+    {
+      approxPolyDP( contours[i], contours_poly[i], 1, true );
+      minEnclosingCircle( contours_poly[i], centers[i], radius[i] );
+      drawContours( contourMask, contours_poly, (int)i, 255 );
+      circle( contourMask, centers[i], (int)radius[i], 255, -1 );
+    }
+  }
+  morphologyEx(contourMask, contourMask, MORPH_DILATE, kernel3x3, Point(-1,-1), 1);
+
+  imshow("contourMask", contourMask);
+  waitKey(0);
 
   // create surrounding mask (invert cloak_mask)
   Mat surrounding_mask;
   bitwise_not(cloak_mask, surrounding_mask);
+  addWeighted(surrounding_mask, 1, contourMask, 1, 0, surrounding_mask);
+  morphologyEx(surrounding_mask, surrounding_mask, MORPH_ERODE, ellipse7x7, Point(-1,-1), 1); // does opposite of erode in this case
+
   imshow("surrounding_mask", surrounding_mask);
   waitKey(0);
-
   destroyAllWindows();
 
   // segment out cloak
@@ -107,8 +114,10 @@ int main()
   imshow("segmented_frame", segmented_frame);
   waitKey(0);
 
-  // create hole fill
+  // overlay background on cloak hole
   Mat background_fill;
+  subtract(cloak_mask, contourMask, cloak_mask);
+  morphologyEx(cloak_mask, cloak_mask, MORPH_DILATE, ellipse7x7, Point(-1,-1), 1);
   bitwise_and(background, background, background_fill, cloak_mask);
   imshow("background_fill", background_fill);
   waitKey(0);
