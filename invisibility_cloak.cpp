@@ -1,3 +1,10 @@
+/**
+ * 
+ * Takes video as input, segments out the "cloak", and overlays the background
+ * on top of it creating an invisibility cloak effect
+ * 
+ **/
+
 #include <iostream>
 #include <string>
 #include <opencv2/videoio.hpp>
@@ -19,7 +26,6 @@ void displayAsImage(Mat img)
 Mat processFrame(Mat frame, Mat background, int frame_width, int frame_height)
 {
     Mat result;
-
     flip(frame, frame, 1);
 
     // opencv read imgs as BGR, convert to hsv which is more similar to how humans perceive colour and will allow
@@ -31,19 +37,16 @@ Mat processFrame(Mat frame, Mat background, int frame_width, int frame_height)
     Mat cloak_mask;
     inRange(hsv_frame, Scalar(118, 10, 70), Scalar(175, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
 
-    // clean cloak_mask, erosion to remove noise and dilate to expand eroded mask
+    // some kernels to be used during segmentation process
     Mat kernel3x3 = Mat::ones(3, 3, CV_32F);
     Mat kernel5x5 = Mat::ones(5, 5, CV_32F);
-    Mat kernel7x7 = Mat::ones(7, 7, CV_32F);
-    Mat kernel9x9 = Mat::ones(9, 9, CV_32F);
-
-    Mat ellipse5x5 = getStructuringElement(MORPH_ELLIPSE, Size(5, 5));
     Mat ellipse7x7 = getStructuringElement(MORPH_ELLIPSE, Size(7, 7));
 
+    // clean cloak_mask a bit, erosion follwed by open operation to remove some noise and expand eroded mask
     morphologyEx(cloak_mask, cloak_mask, MORPH_ERODE, kernel5x5);
     morphologyEx(cloak_mask, cloak_mask, MORPH_OPEN, kernel5x5);
 
-    // find remaining noise and mask
+    // find remaining noise and generate mask for this noise
     Mat contourMask = Mat::zeros(frame_height, frame_width, CV_8U);
     vector<Mat> contours;
     findContours(cloak_mask, contours, RETR_LIST, CHAIN_APPROX_SIMPLE);
@@ -67,7 +70,7 @@ Mat processFrame(Mat frame, Mat background, int frame_width, int frame_height)
     }
     morphologyEx(contourMask, contourMask, MORPH_DILATE, kernel3x3, Point(-1,-1), 1);
 
-    // create surrounding mask (invert cloak_mask)
+    // create mask for surrounding (invert cloak_mask)
     Mat surrounding_mask;
     bitwise_not(cloak_mask, surrounding_mask);
     addWeighted(surrounding_mask, 1, contourMask, 1, 0, surrounding_mask);
@@ -91,16 +94,18 @@ Mat processFrame(Mat frame, Mat background, int frame_width, int frame_height)
 
 int main()
 {
-    VideoCapture cap("video.mp4");
+    // get video
+    string videoFile = "video.mp4";
+    VideoCapture cap(videoFile);
     if (!cap.isOpened())
     {
         cout << "Error opening file" << endl;
         return -1;
     }
-
     int frame_width = cap.get(CV_CAP_PROP_FRAME_WIDTH);
     int frame_height = cap.get(CV_CAP_PROP_FRAME_HEIGHT);
 
+    // create new video
     VideoWriter video("result.mp4", CV_FOURCC('m','p','4','v'), 25, Size(frame_width,frame_height));
 
     // assume first couple frames are of background
@@ -112,12 +117,13 @@ int main()
     }
     flip(background, background, 1);
 
+    // process the rest of the frames 
     Mat processedFrame;
-    // int count = 0;
+    // int frameCount = 0;
     while (!frame.empty())
     {
         processedFrame = processFrame(frame, background, frame_width, frame_height);
-        // cout << count++ << endl;
+        // cout << frameCount++ << endl;
         // imshow("processedFrame", processedFrame);
         // waitKey(0);
         video.write(processedFrame);
