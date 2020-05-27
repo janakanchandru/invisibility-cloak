@@ -49,7 +49,7 @@ int main()
   Mat hsv_frame;
   cvtColor(frame, hsv_frame, COLOR_BGR2HSV);
 
-  // create mask for cloak
+  // create mask for cloak by detecting cloth colour
   Mat cloak_mask;
   inRange(hsv_frame, Scalar(118, 10, 70), Scalar(175, 255, 255), cloak_mask); // (hue, saturation, value/brightness)
 
