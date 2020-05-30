@@ -10,6 +10,8 @@ It was quite impressive to see how simple it would be to make such a program. Th
     - the main program which takes a video as input and outputs a new video with the invisibility cloak effect implemented
 - `invisibility_cloak_steps.cpp`
     - essentially a copy of the main program however it illustrates the step-by-step process to achieve the invisbility cloak effect on a single frame
+- `live_invisibility_cloak.cpp`
+    - same things as the main program, but uses the webcam and displays the result live
 - `video.mp4`
     - the video I used as my input
 - `result.mp4`
